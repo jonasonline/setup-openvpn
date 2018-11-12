@@ -24,6 +24,7 @@ sudo sed -i -e 's/;push "dhcp-option DNS 208.67.220.220"/push "dhcp-option DNS 2
 sudo sed -i -e 's/port 1194/port 443/g' /etc/openvpn/server.conf
 sudo sed -i -e 's/;proto tcp/proto tcp/g' /etc/openvpn/server.conf
 sudo sed -i -e 's/proto udp/;proto udp/g' /etc/openvpn/server.conf
+sudo echo "duplicate-cn" >> /etc/openvpn/server.conf
 sudo sed -i -e 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
 sudo sysctl -p
 cd /tmp
