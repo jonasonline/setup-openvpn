@@ -4,6 +4,9 @@
 sudo apt-get update
 sudo apt-get install openvpn easy-rsa -y
 
+# Create the .rnd file to avoid RNG errors
+openssl rand -writerand ~/.rnd
+
 # Create a directory for Easy-RSA and move into it
 make-cadir ~/openvpn-ca
 cd ~/openvpn-ca
@@ -28,9 +31,6 @@ sudo cp ta.key /etc/openvpn/
 # Generate client certificate and key
 ./easyrsa gen-req client1 nopass
 ./easyrsa sign-req client client1
-
-# Create the .rnd file to avoid RNG errors
-openssl rand -writerand ~/.rnd
 
 # Copy necessary files to the OpenVPN configuration directory
 sudo cp pki/ca.crt pki/issued/server.crt pki/private/server.key ta.key pki/dh.pem /etc/openvpn
