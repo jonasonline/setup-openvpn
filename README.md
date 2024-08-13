@@ -25,7 +25,7 @@ This script automates the process of setting up an OpenVPN server on Ubuntu usin
 Clone this repository or download the script file to your server.
 
 ```bash
-git clone https://github.com/your-repository/openvpn-setup.git
+git clone https://github.com/jonasonline/openvpn-setup.git
 cd openvpn-setup
 chmod +x setup_openvpn.sh
 sudo ./setup_openvpn.sh
