@@ -1,18 +1,20 @@
+#!/bin/bash
+
 # Update package list and install OpenVPN and Easy-RSA
 sudo apt-get update
 sudo apt-get install openvpn easy-rsa -y
 
-# Create a directory for Easy-RSA and copy the script there
+# Create a directory for Easy-RSA and move into it
 make-cadir ~/openvpn-ca
 cd ~/openvpn-ca
 
-# Initialize PKI (Public Key Infrastructure)
+# Initialize the Public Key Infrastructure (PKI)
 ./easyrsa init-pki
 
 # Build the Certificate Authority (CA)
 ./easyrsa build-ca nopass
 
-# Generate server certificate
+# Generate the server certificate and key
 ./easyrsa gen-req server nopass
 ./easyrsa sign-req server server
 
@@ -23,7 +25,7 @@ cd ~/openvpn-ca
 openvpn --genkey --secret ta.key
 sudo cp ta.key /etc/openvpn/
 
-# Generate client certificate
+# Generate client certificate and key
 ./easyrsa gen-req client1 nopass
 ./easyrsa sign-req client client1
 
@@ -33,23 +35,35 @@ openssl rand -writerand ~/.rnd
 # Copy necessary files to the OpenVPN configuration directory
 sudo cp pki/ca.crt pki/issued/server.crt pki/private/server.key ta.key pki/dh.pem /etc/openvpn
 
-# Configure the OpenVPN server
-sudo sed -i -e 's/;tls-auth/tls-auth/g' /etc/openvpn/server.conf
-sudo sed -i '/tls-auth ta.key 0 # This file is secret/a key-direction 0' /etc/openvpn/server.conf
-sudo sed -i -e 's/;cipher AES-128-CBC/cipher AES-128-CBC/g' /etc/openvpn/server.conf
-sudo sed -i '/cipher AES-128-CBC/a auth SHA256' /etc/openvpn/server.conf
-sudo sed -i -e 's/;user nobody/user nobody/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/;group nogroup/group nogroup/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/;push "redirect-gateway def1 bypass-dhcp"/push "redirect-gateway def1 bypass-dhcp"/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/;push "dhcp-option DNS 208.67.222.222"/push "dhcp-option DNS 208.67.222.222"/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/;push "dhcp-option DNS 208.67.220.220"/push "dhcp-option DNS 208.67.220.220"/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/port 1194/port 443/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/;proto tcp/proto tcp/g' /etc/openvpn/server.conf
-sudo sed -i -e 's/proto udp/;proto udp/g' /etc/openvpn/server.conf
-sudo echo "duplicate-cn" >> /etc/openvpn/server.conf
-sudo echo "dev tun" | sudo tee -a /etc/openvpn/server.conf
-sudo echo "server 10.8.0.0 255.255.255.0" | sudo tee -a /etc/openvpn/server.conf
-sudo echo "log-append /var/log/openvpn.log" | sudo tee -a /etc/openvpn/server.conf
+# Create and configure the OpenVPN server configuration file
+sudo bash -c 'cat > /etc/openvpn/server.conf << EOF
+port 443
+proto tcp
+dev tun
+ca /etc/openvpn/ca.crt
+cert /etc/openvpn/server.crt
+key /etc/openvpn/server.key
+dh /etc/openvpn/dh.pem
+tls-auth /etc/openvpn/ta.key 0
+cipher AES-128-CBC
+auth SHA256
+server 10.8.0.0 255.255.255.0
+ifconfig-pool-persist /etc/openvpn/ipp.txt
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS 208.67.222.222"
+push "dhcp-option DNS 208.67.220.220"
+keepalive 10 120
+persist-key
+persist-tun
+user nobody
+group nogroup
+log-append /var/log/openvpn.log
+status /var/log/openvpn-status.log
+verb 3
+duplicate-cn
+EOF'
+
+# Enable IP forwarding
 sudo sed -i -e 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
 sudo sysctl -p
 
@@ -68,7 +82,7 @@ echo "
 COMMIT
 # END OPENVPN RULES
 
-" >> UFWSettingsForOpenVPN
+" > UFWSettingsForOpenVPN
 sudo sed -i -E '/#   ufw-before-forward/r UFWSettingsForOpenVPN' /etc/ufw/before.rules
 rm UFWSettingsForOpenVPN
 sudo sed -i -e 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
@@ -87,7 +101,7 @@ chmod 700 ~/client-configs/files
 cp /usr/share/doc/openvpn/examples/sample-config-files/client.conf ~/client-configs/base.conf
 
 # Customize the client configuration
-IP=$(curl 'https://api.ipify.org')
+IP=$(curl -s https://api.ipify.org)
 sed -i -e "s/remote my-server-1 1194/remote $IP 443/g" ~/client-configs/base.conf
 sed -i -e 's/;proto tcp/proto tcp/g' ~/client-configs/base.conf
 sed -i -e 's/proto udp/;proto udp/g' ~/client-configs/base.conf
