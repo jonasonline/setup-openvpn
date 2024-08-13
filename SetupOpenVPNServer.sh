@@ -21,6 +21,7 @@ cd ~/openvpn-ca
 
 # Generate a HMAC signature key for TLS-auth
 openvpn --genkey --secret ta.key
+sudo cp ta.key /etc/openvpn/
 
 # Generate client certificate
 ./easyrsa gen-req client1 nopass
@@ -46,6 +47,9 @@ sudo sed -i -e 's/port 1194/port 443/g' /etc/openvpn/server.conf
 sudo sed -i -e 's/;proto tcp/proto tcp/g' /etc/openvpn/server.conf
 sudo sed -i -e 's/proto udp/;proto udp/g' /etc/openvpn/server.conf
 sudo echo "duplicate-cn" >> /etc/openvpn/server.conf
+sudo echo "dev tun" | sudo tee -a /etc/openvpn/server.conf
+sudo echo "server 10.8.0.0 255.255.255.0" | sudo tee -a /etc/openvpn/server.conf
+sudo echo "log-append /var/log/openvpn.log" | sudo tee -a /etc/openvpn/server.conf
 sudo sed -i -e 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
 sudo sysctl -p
 
@@ -100,6 +104,33 @@ echo "# script-security 2" >> ~/client-configs/base.conf
 echo "# up /etc/openvpn/update-resolv-conf" >> ~/client-configs/base.conf
 echo "# down /etc/openvpn/update-resolv-conf" >> ~/client-configs/base.conf
 
-# Download script to create client configuration files
-wget -O ~/client-configs/make_config.sh https://git.io/vxyc7
-chmod 700 ~/client-configs/make_config.sh
+# Create make_config.sh script to generate .ovpn files
+cat <<'EOF' > ~/client-configs/make_config.sh
+#!/bin/bash
+
+# First argument: Client identifier
+KEY_DIR=~/openvpn-ca/pki
+OUTPUT_DIR=~/client-configs/files
+BASE_CONFIG=~/client-configs/base.conf
+
+cat ${BASE_CONFIG} \
+    <(echo -e '<ca>') \
+    ${KEY_DIR}/ca.crt \
+    <(echo -e '</ca>\n<cert>') \
+    ${KEY_DIR}/issued/${1}.crt \
+    <(echo -e '</cert>\n<key>') \
+    ${KEY_DIR}/private/${1}.key \
+    <(echo -e '</key>\n<tls-auth>') \
+    ${KEY_DIR}/ta.key \
+    <(echo -e '</tls-auth>') \
+    > ${OUTPUT_DIR}/${1}.ovpn
+EOF
+
+# Make the script executable
+chmod +x ~/client-configs/make_config.sh
+
+# Generate the .ovpn file for the client
+cd ~/client-configs
+./make_config.sh client1
+
+echo "Client configuration file created at: ~/client-configs/files/client1.ovpn"
