@@ -7,7 +7,7 @@ apt-get install -y openvpn easy-rsa curl
 # Fetch the external IP address of the server
 EXTERNAL_IP=$(curl -s ifconfig.me)
 
-# Set up the Easy-RSA environment
+# Set up the Easy-RSA environment in the user's home directory
 make-cadir ~/openvpn-ca
 cd ~/openvpn-ca
 
@@ -23,7 +23,6 @@ EOF
 
 # Build the certificate authority
 source vars
-export RANDFILE=/dev/urandom
 ./easyrsa init-pki
 ./easyrsa build-ca nopass
 
@@ -42,7 +41,7 @@ export RANDFILE=/dev/urandom
 openvpn --genkey --secret ta.key
 
 # Copy certificates and keys to the OpenVPN directory
-cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem ta.key /etc/openvpn/
+sudo cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem ta.key /etc/openvpn/
 
 # Create the OpenVPN server configuration with port 1194
 cat << EOF > /etc/openvpn/server.conf
@@ -72,18 +71,18 @@ verb 3
 EOF
 
 # Enable packet forwarding
-sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
-sysctl -p
+sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+sudo sysctl -p
 
 # Set up firewall rules for port 1194
-ufw allow 1194/udp
-ufw allow OpenSSH
-ufw disable
-ufw enable
+sudo ufw allow 1194/udp
+sudo ufw allow OpenSSH
+sudo ufw disable
+sudo ufw enable
 
 # Start and enable OpenVPN
-systemctl start openvpn@server
-systemctl enable openvpn@server
+sudo systemctl start openvpn@server
+sudo systemctl enable openvpn@server
 
 # Client configuration file generation
 mkdir -p ~/client-configs/keys
