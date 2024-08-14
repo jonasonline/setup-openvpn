@@ -121,12 +121,12 @@ verb 3
 EOF"
 
 # Create a script to package the client configuration
-sudo -u $USERNAME bash -c "cat << EOF > $USER_HOME/client-configs/make_config.sh
+sudo -u $USERNAME bash -c "cat << 'EOL' > $USER_HOME/client-configs/make_config.sh
 #!/bin/bash
 
-KEY_DIR=\$USER_HOME/client-configs/keys
-OUTPUT_DIR=\$USER_HOME/client-configs/files
-BASE_CONFIG=\$USER_HOME/client-configs/base.conf
+KEY_DIR=\"$USER_HOME/client-configs/keys\"
+OUTPUT_DIR=\"$USER_HOME/client-configs/files\"
+BASE_CONFIG=\"$USER_HOME/client-configs/base.conf\"
 
 mkdir -p \${OUTPUT_DIR}
 
@@ -141,7 +141,7 @@ cat \${BASE_CONFIG} \\
     \${KEY_DIR}/ta.key \\
     <(echo -e '</tls-auth>') \\
     > \${OUTPUT_DIR}/client1.ovpn
-EOF"
+EOL"
 
 chmod 700 "$USER_HOME/client-configs/make_config.sh"
 
