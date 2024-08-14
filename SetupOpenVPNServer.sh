@@ -1,11 +1,12 @@
 #!/bin/bash
 
-# Get the current user's home directory
+# Get the current user's home directory and username
 USER_HOME=$(eval echo ~$SUDO_USER)
+USERNAME=$(whoami)
 
 # Update and install necessary packages
-apt-get update -y
-apt-get install -y openvpn easy-rsa curl
+sudo apt-get update -y
+sudo apt-get install -y openvpn easy-rsa curl
 
 # Fetch the external IP address of the server
 EXTERNAL_IP=$(curl -s ifconfig.me)
@@ -23,6 +24,9 @@ export EASYRSA_REQ_ORG="MyCompany"
 export EASYRSA_REQ_EMAIL="admin@example.com"
 export EASYRSA_REQ_OU="MyOrganizationalUnit"
 EOF
+
+# Change ownership of the Easy-RSA directory to the current user
+sudo chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/openvpn-ca"
 
 # Build the certificate authority
 source vars
@@ -93,7 +97,10 @@ chmod -R 700 "$USER_HOME/client-configs"
 cp "$USER_HOME/openvpn-ca/pki/private/client1.key" "$USER_HOME/client-configs/keys/"
 cp "$USER_HOME/openvpn-ca/pki/issued/client1.crt" "$USER_HOME/client-configs/keys/"
 cp "$USER_HOME/openvpn-ca/pki/ca.crt" "$USER_HOME/client-configs/keys/"
-cp /etc/openvpn/ta.key "$USER_HOME/client-configs/keys/"
+sudo cp /etc/openvpn/ta.key "$USER_HOME/client-configs/keys/"
+
+# Change ownership of the client-configs directory to the current user
+sudo chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/client-configs"
 
 # Create base client config using external IP and port 1194
 cat << EOF > "$USER_HOME/client-configs/base.conf"
