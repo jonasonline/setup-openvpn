@@ -27,8 +27,8 @@ Clone this repository or download the script file to your server.
 ```bash
 git clone https://github.com/jonasonline/openvpn-setup.git
 cd openvpn-setup
-chmod +x setup_openvpn.sh
-sudo ./setup_openvpn.sh
+chmod +x SetupOpenVPNServer.sh
+sudo ./SetupOpenVPNServer.sh
 ```
 
 ### 2. Verify OpenVPN Service
@@ -82,26 +82,14 @@ This will generate a `client1.ovpn` file in the `~/client-configs/files/` direct
 
 3. Open the OpenVPN client, import the `.ovpn` file, and connect.
 
-## Additional Configuration
-
-### Random Number Generator (RNG) Error Fix
-
-The script includes a step to generate a `.rnd` file to avoid RNG-related errors during key generation:
-
-```bash
-openssl rand -writerand ~/.rnd
-```
-
-This ensures that OpenSSL has sufficient entropy for secure operations.
-
 ## Notes
 
-- The script configures OpenVPN to use port `443` with TCP protocol by default. This can be changed in the `/etc/openvpn/server.conf` file if needed.
-- The default encryption settings include `AES-128-CBC` for the cipher and `SHA256` for HMAC authentication.
+- The script configures OpenVPN to use port `1194` with UDP protocol by default. This can be changed in the `/etc/openvpn/server.conf` file if needed.
+- The default encryption settings include `AES-256-GCM` for the cipher and `SHA256` for HMAC authentication.
 
 ## Troubleshooting
 
-- **Firewall Issues:** If clients cannot connect, ensure that UFW or any other firewall is properly configured to allow traffic on port `443/tcp`.
+- **Firewall Issues:** If clients cannot connect, ensure that UFW or any other firewall is properly configured to allow traffic on port `1194/udp`.
 - **Client Configuration:** Make sure the client `.ovpn` file is correctly configured with the server's public IP address or domain name.
 
 ## Contributing

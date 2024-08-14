@@ -13,16 +13,17 @@ cd ~/openvpn-ca
 
 # Customize the vars file
 cat << EOF > vars
-set_var EASYRSA_REQ_COUNTRY    "US"
-set_var EASYRSA_REQ_PROVINCE   "CA"
-set_var EASYRSA_REQ_CITY       "San Francisco"
-set_var EASYRSA_REQ_ORG        "MyCompany"
-set_var EASYRSA_REQ_EMAIL      "admin@example.com"
-set_var EASYRSA_REQ_OU         "MyOrganizationalUnit"
+export EASYRSA_REQ_COUNTRY="US"
+export EASYRSA_REQ_PROVINCE="CA"
+export EASYRSA_REQ_CITY="San Francisco"
+export EASYRSA_REQ_ORG="MyCompany"
+export EASYRSA_REQ_EMAIL="admin@example.com"
+export EASYRSA_REQ_OU="MyOrganizationalUnit"
 EOF
 
 # Build the certificate authority
 source vars
+export RANDFILE=/dev/urandom
 ./easyrsa init-pki
 ./easyrsa build-ca nopass
 
