@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Get the current user's home directory
+USER_HOME=$(eval echo ~$SUDO_USER)
+
 # Update and install necessary packages
 apt-get update -y
 apt-get install -y openvpn easy-rsa curl
@@ -8,8 +11,8 @@ apt-get install -y openvpn easy-rsa curl
 EXTERNAL_IP=$(curl -s ifconfig.me)
 
 # Set up the Easy-RSA environment in the user's home directory
-make-cadir ~/openvpn-ca
-cd ~/openvpn-ca
+make-cadir "$USER_HOME/openvpn-ca"
+cd "$USER_HOME/openvpn-ca"
 
 # Customize the vars file
 cat << EOF > vars
@@ -85,15 +88,15 @@ sudo systemctl start openvpn@server
 sudo systemctl enable openvpn@server
 
 # Client configuration file generation
-mkdir -p ~/client-configs/keys
-chmod -R 700 ~/client-configs
-cp ~/openvpn-ca/pki/private/client1.key ~/client-configs/keys/
-cp ~/openvpn-ca/pki/issued/client1.crt ~/client-configs/keys/
-cp ~/openvpn-ca/pki/ca.crt ~/client-configs/keys/
-cp /etc/openvpn/ta.key ~/client-configs/keys/
+mkdir -p "$USER_HOME/client-configs/keys"
+chmod -R 700 "$USER_HOME/client-configs"
+cp "$USER_HOME/openvpn-ca/pki/private/client1.key" "$USER_HOME/client-configs/keys/"
+cp "$USER_HOME/openvpn-ca/pki/issued/client1.crt" "$USER_HOME/client-configs/keys/"
+cp "$USER_HOME/openvpn-ca/pki/ca.crt" "$USER_HOME/client-configs/keys/"
+cp /etc/openvpn/ta.key "$USER_HOME/client-configs/keys/"
 
 # Create base client config using external IP and port 1194
-cat << EOF > ~/client-configs/base.conf
+cat << EOF > "$USER_HOME/client-configs/base.conf"
 client
 dev tun
 proto udp
@@ -113,12 +116,12 @@ verb 3
 EOF
 
 # Create a script to package the client configuration
-cat << EOF > ~/client-configs/make_config.sh
+cat << EOF > "$USER_HOME/client-configs/make_config.sh"
 #!/bin/bash
 
-KEY_DIR=~/client-configs/keys
-OUTPUT_DIR=~/client-configs/files
-BASE_CONFIG=~/client-configs/base.conf
+KEY_DIR=$USER_HOME/client-configs/keys
+OUTPUT_DIR=$USER_HOME/client-configs/files
+BASE_CONFIG=$USER_HOME/client-configs/base.conf
 
 mkdir -p \${OUTPUT_DIR}
 
@@ -135,6 +138,6 @@ cat \${BASE_CONFIG} \\
     > \${OUTPUT_DIR}/client1.ovpn
 EOF
 
-chmod 700 ~/client-configs/make_config.sh
+chmod 700 "$USER_HOME/client-configs/make_config.sh"
 
-echo "OpenVPN server setup is complete. Use ~/client-configs/make_config.sh to generate client configuration."
+echo "OpenVPN server setup is complete. Use $USER_HOME/client-configs/make_config.sh to generate client configuration."
