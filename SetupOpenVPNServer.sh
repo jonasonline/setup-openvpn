@@ -2,7 +2,7 @@
 
 # Get the current user's home directory and username
 USER_HOME=$(eval echo ~$SUDO_USER)
-USERNAME=$(whoami)
+USERNAME=$SUDO_USER
 
 # Update and install necessary packages
 sudo apt-get update -y
@@ -26,32 +26,30 @@ export EASYRSA_REQ_OU="MyOrganizationalUnit"
 EOF
 
 # Change ownership of the Easy-RSA directory to the current user
-sudo chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/openvpn-ca"
+sudo chown -R $USERNAME:$USERNAME "$USER_HOME/openvpn-ca"
 
 # Build the certificate authority
-source vars
-./easyrsa init-pki
-./easyrsa build-ca nopass
+sudo -u $USERNAME bash -c "source vars; ./easyrsa init-pki; ./easyrsa build-ca nopass"
 
 # Generate a server certificate and key
-./easyrsa gen-req server nopass
-./easyrsa sign-req server server
+sudo -u $USERNAME bash -c "./easyrsa gen-req server nopass"
+sudo -u $USERNAME bash -c "./easyrsa sign-req server server"
 
 # Generate Diffie-Hellman key exchange
-./easyrsa gen-dh
+sudo -u $USERNAME bash -c "./easyrsa gen-dh"
 
 # Generate a client certificate and key
-./easyrsa gen-req client1 nopass
-./easyrsa sign-req client client1
+sudo -u $USERNAME bash -c "./easyrsa gen-req client1 nopass"
+sudo -u $USERNAME bash -c "./easyrsa sign-req client client1"
 
 # Generate a shared HMAC key for extra security
-openvpn --genkey --secret ta.key
+sudo -u $USERNAME bash -c "openvpn --genkey --secret ta.key"
 
 # Copy certificates and keys to the OpenVPN directory
 sudo cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem ta.key /etc/openvpn/
 
 # Create the OpenVPN server configuration with port 1194
-cat << EOF > /etc/openvpn/server.conf
+sudo bash -c "cat << EOF > /etc/openvpn/server.conf
 port 1194
 proto udp
 dev tun
@@ -63,9 +61,9 @@ auth SHA256
 tls-auth ta.key 0
 topology subnet
 server 10.8.0.0 255.255.255.0
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 1.1.1.1"
-push "dhcp-option DNS 1.0.0.1"
+push \"redirect-gateway def1 bypass-dhcp\"
+push \"dhcp-option DNS 1.1.1.1\"
+push \"dhcp-option DNS 1.0.0.1\"
 keepalive 10 120
 cipher AES-256-GCM
 user nobody
@@ -75,7 +73,7 @@ persist-tun
 status /var/log/openvpn-status.log
 log-append /var/log/openvpn.log
 verb 3
-EOF
+EOF"
 
 # Enable packet forwarding
 sudo sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
@@ -100,10 +98,10 @@ cp "$USER_HOME/openvpn-ca/pki/ca.crt" "$USER_HOME/client-configs/keys/"
 sudo cp /etc/openvpn/ta.key "$USER_HOME/client-configs/keys/"
 
 # Change ownership of the client-configs directory to the current user
-sudo chown -R $SUDO_USER:$SUDO_USER "$USER_HOME/client-configs"
+sudo chown -R $USERNAME:$USERNAME "$USER_HOME/client-configs"
 
 # Create base client config using external IP and port 1194
-cat << EOF > "$USER_HOME/client-configs/base.conf"
+sudo -u $USERNAME bash -c "cat << EOF > $USER_HOME/client-configs/base.conf
 client
 dev tun
 proto udp
@@ -120,15 +118,15 @@ key client1.key
 tls-auth ta.key 1
 cipher AES-256-GCM
 verb 3
-EOF
+EOF"
 
 # Create a script to package the client configuration
-cat << EOF > "$USER_HOME/client-configs/make_config.sh"
+sudo -u $USERNAME bash -c "cat << EOF > $USER_HOME/client-configs/make_config.sh
 #!/bin/bash
 
-KEY_DIR=$USER_HOME/client-configs/keys
-OUTPUT_DIR=$USER_HOME/client-configs/files
-BASE_CONFIG=$USER_HOME/client-configs/base.conf
+KEY_DIR=\$USER_HOME/client-configs/keys
+OUTPUT_DIR=\$USER_HOME/client-configs/files
+BASE_CONFIG=\$USER_HOME/client-configs/base.conf
 
 mkdir -p \${OUTPUT_DIR}
 
@@ -143,7 +141,7 @@ cat \${BASE_CONFIG} \\
     \${KEY_DIR}/ta.key \\
     <(echo -e '</tls-auth>') \\
     > \${OUTPUT_DIR}/client1.ovpn
-EOF
+EOF"
 
 chmod 700 "$USER_HOME/client-configs/make_config.sh"
 
