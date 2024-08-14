@@ -43,9 +43,9 @@ openvpn --genkey --secret ta.key
 # Copy certificates and keys to the OpenVPN directory
 cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem ta.key /etc/openvpn/
 
-# Create the OpenVPN server configuration with port 443
+# Create the OpenVPN server configuration with port 1194
 cat << EOF > /etc/openvpn/server.conf
-port 443
+port 1194
 proto udp
 dev tun
 ca ca.crt
@@ -60,7 +60,7 @@ push "redirect-gateway def1 bypass-dhcp"
 push "dhcp-option DNS 1.1.1.1"
 push "dhcp-option DNS 1.0.0.1"
 keepalive 10 120
-cipher AES-256-CBC
+cipher AES-256-GCM
 user nobody
 group nogroup
 persist-key
@@ -74,8 +74,8 @@ EOF
 sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
 sysctl -p
 
-# Set up firewall rules for port 443
-ufw allow 443/udp
+# Set up firewall rules for port 1194
+ufw allow 1194/udp
 ufw allow OpenSSH
 ufw disable
 ufw enable
@@ -92,12 +92,12 @@ cp ~/openvpn-ca/pki/issued/client1.crt ~/client-configs/keys/
 cp ~/openvpn-ca/pki/ca.crt ~/client-configs/keys/
 cp /etc/openvpn/ta.key ~/client-configs/keys/
 
-# Create base client config using external IP and port 443
+# Create base client config using external IP and port 1194
 cat << EOF > ~/client-configs/base.conf
 client
 dev tun
 proto udp
-remote $EXTERNAL_IP 443
+remote $EXTERNAL_IP 1194
 resolv-retry infinite
 nobind
 user nobody
@@ -108,7 +108,7 @@ ca ca.crt
 cert client1.crt
 key client1.key
 tls-auth ta.key 1
-cipher AES-256-CBC
+cipher AES-256-GCM
 verb 3
 EOF
 
