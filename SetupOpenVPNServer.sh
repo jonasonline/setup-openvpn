@@ -1,149 +1,140 @@
 #!/bin/bash
 
-# Update package list and install OpenVPN and Easy-RSA
-sudo apt-get update
-sudo apt-get install openvpn easy-rsa -y
+# Update and install necessary packages
+apt-get update -y
+apt-get install -y openvpn easy-rsa curl
 
-# Create the .rnd file to avoid RNG errors and place it in the home directory
-openssl rand -writerand ~/.rnd
+# Fetch the external IP address of the server
+EXTERNAL_IP=$(curl -s ifconfig.me)
 
-# Create a directory for Easy-RSA and move into it
+# Set up the Easy-RSA environment
 make-cadir ~/openvpn-ca
 cd ~/openvpn-ca
 
-# Initialize the Public Key Infrastructure (PKI)
-./easyrsa init-pki
+# Customize the vars file
+cat << EOF > vars
+set_var EASYRSA_REQ_COUNTRY    "US"
+set_var EASYRSA_REQ_PROVINCE   "CA"
+set_var EASYRSA_REQ_CITY       "San Francisco"
+set_var EASYRSA_REQ_ORG        "MyCompany"
+set_var EASYRSA_REQ_EMAIL      "admin@example.com"
+set_var EASYRSA_REQ_OU         "MyOrganizationalUnit"
+EOF
 
-# Build the Certificate Authority (CA)
+# Build the certificate authority
+source vars
+./easyrsa init-pki
 ./easyrsa build-ca nopass
 
-# Generate the server certificate and key
+# Generate a server certificate and key
 ./easyrsa gen-req server nopass
 ./easyrsa sign-req server server
 
-# Generate Diffie-Hellman parameters
+# Generate Diffie-Hellman key exchange
 ./easyrsa gen-dh
 
-# Generate a HMAC signature key for TLS-auth
-openvpn --genkey --secret ~/openvpn-ca/pki/ta.key
-
-# Generate client certificate and key
+# Generate a client certificate and key
 ./easyrsa gen-req client1 nopass
 ./easyrsa sign-req client client1
 
-# Copy necessary files to the OpenVPN configuration directory
-sudo cp pki/ca.crt pki/issued/server.crt pki/private/server.key pki/ta.key pki/dh.pem /etc/openvpn
+# Generate a shared HMAC key for extra security
+openvpn --genkey --secret ta.key
 
-# Create and configure the OpenVPN server configuration file
-sudo bash -c 'cat > /etc/openvpn/server.conf << EOF
+# Copy certificates and keys to the OpenVPN directory
+cp pki/ca.crt pki/private/server.key pki/issued/server.crt pki/dh.pem ta.key /etc/openvpn/
+
+# Create the OpenVPN server configuration with port 443
+cat << EOF > /etc/openvpn/server.conf
 port 443
-proto tcp
+proto udp
 dev tun
-ca /etc/openvpn/ca.crt
-cert /etc/openvpn/server.crt
-key /etc/openvpn/server.key
-dh /etc/openvpn/dh.pem
-tls-auth /etc/openvpn/ta.key 0
-cipher AES-128-CBC
+ca ca.crt
+cert server.crt
+key server.key
+dh dh.pem
 auth SHA256
+tls-auth ta.key 0
+topology subnet
 server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist /etc/openvpn/ipp.txt
 push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 208.67.222.222"
-push "dhcp-option DNS 208.67.220.220"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 1.0.0.1"
 keepalive 10 120
-persist-key
-persist-tun
+cipher AES-256-CBC
 user nobody
 group nogroup
-log-append /var/log/openvpn.log
+persist-key
+persist-tun
 status /var/log/openvpn-status.log
+log-append /var/log/openvpn.log
 verb 3
-duplicate-cn
-EOF'
+EOF
 
-# Enable IP forwarding
-sudo sed -i -e 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
-sudo sysctl -p
+# Enable packet forwarding
+sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+sysctl -p
 
-# UFW configuration for OpenVPN
-cd /tmp
-DEFAULT_NIC=$(ip route | grep default | grep -oP "(?<=dev )[^ ]+")
-echo "
-#
+# Set up firewall rules for port 443
+ufw allow 443/udp
+ufw allow OpenSSH
+ufw disable
+ufw enable
 
-# START OPENVPN RULES
-# NAT table rules
-*nat
-:POSTROUTING ACCEPT [0:0] 
-# Allow traffic from OpenVPN client to $DEFAULT_NIC
--A POSTROUTING -s 10.8.0.0/8 -o $DEFAULT_NIC -j MASQUERADE
-COMMIT
-# END OPENVPN RULES
+# Start and enable OpenVPN
+systemctl start openvpn@server
+systemctl enable openvpn@server
 
-" > UFWSettingsForOpenVPN
-sudo sed -i -E '/#   ufw-before-forward/r UFWSettingsForOpenVPN' /etc/ufw/before.rules
-rm UFWSettingsForOpenVPN
-sudo sed -i -e 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/g' /etc/default/ufw
-sudo ufw allow 443/tcp
-sudo ufw allow OpenSSH
-sudo ufw disable
-sudo ufw --force enable
+# Client configuration file generation
+mkdir -p ~/client-configs/keys
+chmod -R 700 ~/client-configs
+cp ~/openvpn-ca/pki/private/client1.key ~/client-configs/keys/
+cp ~/openvpn-ca/pki/issued/client1.crt ~/client-configs/keys/
+cp ~/openvpn-ca/pki/ca.crt ~/client-configs/keys/
+cp /etc/openvpn/ta.key ~/client-configs/keys/
 
-# Start and enable the OpenVPN server
-sudo systemctl start openvpn@server
-sudo systemctl enable openvpn@server
+# Create base client config using external IP and port 443
+cat << EOF > ~/client-configs/base.conf
+client
+dev tun
+proto udp
+remote $EXTERNAL_IP 443
+resolv-retry infinite
+nobind
+user nobody
+group nogroup
+persist-key
+persist-tun
+ca ca.crt
+cert client1.crt
+key client1.key
+tls-auth ta.key 1
+cipher AES-256-CBC
+verb 3
+EOF
 
-# Create client configuration directory
-mkdir -p ~/client-configs/files
-chmod 700 ~/client-configs/files
-cp /usr/share/doc/openvpn/examples/sample-config-files/client.conf ~/client-configs/base.conf
-
-# Customize the client configuration
-IP=$(curl -s https://api.ipify.org)
-sed -i -e "s/remote my-server-1 1194/remote $IP 443/g" ~/client-configs/base.conf
-sed -i -e 's/;proto tcp/proto tcp/g' ~/client-configs/base.conf
-sed -i -e 's/proto udp/;proto udp/g' ~/client-configs/base.conf
-sed -i -e 's/;user nobody/user nobody/g' ~/client-configs/base.conf
-sed -i -e 's/;group nogroup/group nogroup/g' ~/client-configs/base.conf
-sed -i -e 's/ca ca.crt/#ca ca.crt/g' ~/client-configs/base.conf
-sed -i -e 's/cert client.crt/#cert client.crt/g' ~/client-configs/base.conf
-sed -i -e 's/key client.key/#key client.key/g' ~/client-configs/base.conf
-sed -i -e 's/;cipher x/cipher AES-128-CBC/g' ~/client-configs/base.conf
-sed -i '/cipher AES-128-CBC/a auth SHA256' ~/client-configs/base.conf
-sed -i '/auth SHA256/a key-direction 1' ~/client-configs/base.conf
-echo "" >> ~/client-configs/base.conf
-echo "# script-security 2" >> ~/client-configs/base.conf
-echo "# up /etc/openvpn/update-resolv-conf" >> ~/client-configs/base.conf
-echo "# down /etc/openvpn/update-resolv-conf" >> ~/client-configs/base.conf
-
-# Create make_config.sh script to generate .ovpn files
-cat <<'EOF' > ~/client-configs/make_config.sh
+# Create a script to package the client configuration
+cat << EOF > ~/client-configs/make_config.sh
 #!/bin/bash
 
-# First argument: Client identifier
-KEY_DIR=~/openvpn-ca/pki
+KEY_DIR=~/client-configs/keys
 OUTPUT_DIR=~/client-configs/files
 BASE_CONFIG=~/client-configs/base.conf
 
-cat ${BASE_CONFIG} \
-    <(echo -e '<ca>') \
-    ${KEY_DIR}/ca.crt \
-    <(echo -e '</ca>\n<cert>') \
-    ${KEY_DIR}/issued/${1}.crt \
-    <(echo -e '</cert>\n<key>') \
-    ${KEY_DIR}/private/${1}.key \
-    <(echo -e '</key>\n<tls-auth>') \
-    ${KEY_DIR}/ta.key \
-    <(echo -e '</tls-auth>') \
-    > ${OUTPUT_DIR}/${1}.ovpn
+mkdir -p \${OUTPUT_DIR}
+
+cat \${BASE_CONFIG} \\
+    <(echo -e '<ca>') \\
+    \${KEY_DIR}/ca.crt \\
+    <(echo -e '</ca>\n<cert>') \\
+    \${KEY_DIR}/client1.crt \\
+    <(echo -e '</cert>\n<key>') \\
+    \${KEY_DIR}/client1.key \\
+    <(echo -e '</key>\n<tls-auth>') \\
+    \${KEY_DIR}/ta.key \\
+    <(echo -e '</tls-auth>') \\
+    > \${OUTPUT_DIR}/client1.ovpn
 EOF
 
-# Make the script executable
-chmod +x ~/client-configs/make_config.sh
+chmod 700 ~/client-configs/make_config.sh
 
-# Generate the .ovpn file for the client
-cd ~/client-configs
-./make_config.sh client1
-
-echo "Client configuration file created at: ~/client-configs/files/client1.ovpn"
+echo "OpenVPN server setup is complete. Use ~/client-configs/make_config.sh to generate client configuration."
