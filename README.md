@@ -1,97 +1,94 @@
-# OpenVPN Server Setup Script
+# OpenVPN Installation and Uninstallation Scripts
 
-This script automates the process of setting up an OpenVPN server on Ubuntu using Easy-RSA for certificate management. It also includes steps for configuring client connections.
+This repository provides a set of scripts to install and configure OpenVPN on your server, as well as a script to completely remove OpenVPN and its associated configurations.
+
+## Introduction
+
+OpenVPN is a powerful, open-source VPN solution that allows you to secure your network communications. The provided scripts automate the process of setting up OpenVPN on a server and configuring it according to best practices. Additionally, an uninstallation script is included to completely remove OpenVPN and all related configurations from the server.
 
 ## Prerequisites
 
-- Ubuntu Server (Tested on Ubuntu 20.04 and newer)
-- Sudo privileges
+Before running the scripts, ensure that you have:
 
-## What the Script Does
+- A server running a Debian-based Linux distribution (e.g., Ubuntu).
+- Root or sudo access to the server.
+- An active internet connection on the server.
 
-1. Installs necessary packages: `openvpn` and `easy-rsa`.
-2. Initializes the Public Key Infrastructure (PKI) using Easy-RSA.
-3. Generates the Certificate Authority (CA) and server certificates.
-4. Creates Diffie-Hellman parameters and a TLS-auth key for added security.
-5. Configures the OpenVPN server.
-6. Sets up firewall rules using UFW to allow VPN traffic.
-7. Starts and enables the OpenVPN service.
-8. Prepares a script to generate client configuration files.
+## Installation Script
 
-## Usage
+### Usage
 
-### 1. Download and Run the Script
+To install and configure OpenVPN using the provided installation script, follow these steps:
 
-Clone this repository or download the script file to your server.
+1. Clone the repository to your server:
+   
+   ```bash
+   git clone https://github.com/jonasonline/setup-openvpn.git
+   ```
 
-```bash
-git clone https://github.com/jonasonline/openvpn-setup.git
-cd openvpn-setup
-chmod +x SetupOpenVPNServer.sh
-sudo ./SetupOpenVPNServer.sh
-```
+2. Navigate to the cloned directory:
+   
+   ```bash
+   cd setup-openvpn
+   ```
 
-### 2. Verify OpenVPN Service
+3. Run the installation script:
+   
+   ```bash
+   ./setup_openvpn.sh
+   ```
 
-After the script completes, verify that the OpenVPN server is running:
+The script will:
 
-```bash
-sudo systemctl status openvpn@server
-```
+- Update the package list and install necessary packages (`openvpn`, `easy-rsa`).
+- Set up the necessary directories and files for Easy-RSA.
+- Generate the Certificate Authority (CA) and server keys.
+- Configure OpenVPN with best practices.
+- Set up UFW rules for OpenVPN.
+- Enable IP forwarding for VPN traffic.
+- Create client configuration files.
 
-You can also check logs if you encounter issues:
+### Customization
 
-```bash
-sudo journalctl -u openvpn@server
-```
+- The script allows you to configure the OpenVPN server based on your own needs, such as changing the encryption algorithm or specifying different DNS servers.
+- Make sure to update the network interface name (`eth0`) in the UFW rules if your server uses a different interface.
 
-### 3. Generate Client Configuration
+## Uninstallation Script
 
-To create a client configuration file, use the helper script `make_config.sh`:
+### Usage
 
-```bash
-cd ~/client-configs
-./make_config.sh client1
-```
+To completely remove OpenVPN and its associated configurations from your server, follow these steps:
 
-This will generate a `client1.ovpn` file in the `~/client-configs/files/` directory.
+1. Navigate to the cloned directory (if not already there):
+   
+   ```bash
+   cd setup-openvpn
+   ```
 
-### 4. Configure and Connect the Client
+2. Run the uninstallation script:
+   
+   ```bash
+   ./uninstall_openvpn.sh
+   ```
 
-#### On a Linux Client:
+The script will:
 
-1. Install OpenVPN:
+- Stop and disable the OpenVPN service.
+- Uninstall the `openvpn` and `easy-rsa` packages.
+- Remove all directories and files created during the installation process.
+- Revert changes made to UFW and `sysctl.conf`.
+- Optionally, remove any OpenVPN logs.
 
-    ```bash
-    sudo apt-get install openvpn
-    ```
+### Important Notes
 
-2. Copy the `client1.ovpn` file from the server to your client machine.
-
-3. Connect to the VPN:
-
-    ```bash
-    sudo openvpn --config /path/to/client1.ovpn
-    ```
-
-#### On a Windows or macOS Client:
-
-1. Download and install the [OpenVPN client](https://openvpn.net/community-downloads/).
-
-2. Transfer the `client1.ovpn` file to your computer.
-
-3. Open the OpenVPN client, import the `.ovpn` file, and connect.
-
-## Notes
-
-- The script configures OpenVPN to use port `1194` with UDP protocol by default. This can be changed in the `/etc/openvpn/server.conf` file if needed.
-- The default encryption settings include `AES-256-GCM` for the cipher and `SHA256` for HMAC authentication.
+- Ensure that no critical data is stored in the directories that will be deleted by the uninstallation script (`~/easy-rsa`, `~/client-configs`, etc.).
+- After running the uninstallation script, the server will no longer function as an OpenVPN server.
 
 ## Troubleshooting
 
-- **Firewall Issues:** If clients cannot connect, ensure that UFW or any other firewall is properly configured to allow traffic on port `1194/udp`.
-- **Client Configuration:** Make sure the client `.ovpn` file is correctly configured with the server's public IP address or domain name.
+- If you encounter any issues during installation or uninstallation, please verify that you have the correct permissions and that your server meets the prerequisites.
+- For network-related issues, ensure that UFW or any other firewall is configured correctly to allow OpenVPN traffic.
 
-## Contributing
+## License
 
-Contributions are welcome! Please fork this repository and submit a pull request.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
