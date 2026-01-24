@@ -2,7 +2,7 @@
 if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -euo pipefail
 
-VPN_PORT="1194"
+VPN_PORT="443"
 VPN_PROTO="udp"
 
 VPN_NET="10.8.0.0"
