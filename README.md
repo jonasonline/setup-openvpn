@@ -1,7 +1,7 @@
 # OpenVPN Installation and Uninstallation Scripts
 
-This repository provides scripts to **install, configure, repair, and remove OpenVPN** on a Debian-based server.
-The installation script is **fully automated, idempotent**, and uses **modern OpenVPN best practices**, including **tls-crypt-v2** and per-client certificates.
+This repository provides scripts to **install, configure, repair, and remove OpenVPN** on a Debian-based server.  
+The installation script is **fully automated, idempotent**, and uses **modern OpenVPN best practices**, including **tls-crypt-v2**, per-client certificates, and **UDP/TCP fallback on port 443**.
 
 ## Overview
 
@@ -21,6 +21,8 @@ The installation script is **fully automated, idempotent**, and uses **modern Op
 - One certificate per client
 - `tls-crypt-v2` for hardened control channel
 - Client-to-client communication enabled
+- **UDP 443 primary transport**
+- **TCP 443 fallback for restrictive networks**
 - Modern crypto defaults (AES-GCM / ChaCha20)
 - Automatic firewall (UFW) and IP forwarding setup
 - Generates ready-to-use `.ovpn` client files
@@ -35,6 +37,7 @@ Before running the scripts, ensure that you have:
 - Root or sudo access
 - Internet connectivity
 - `bash` available (default on Ubuntu)
+- Ability to open **UDP 443 and TCP 443** in your cloud provider firewall (e.g. Azure NSG)
 
 ---
 
@@ -80,18 +83,22 @@ The script will:
   - One certificate per client
   - tls-crypt-v2 server key
   - tls-crypt-v2 client keys
+- Configure **two OpenVPN server instances**:
+  - **UDP 443** (primary)
+  - **TCP 443** (fallback)
 - Configure OpenVPN with:
   - `tls-crypt-v2`
   - Modern cipher negotiation
   - Client-to-client communication
 - Enable IP forwarding
 - Configure UFW firewall rules (including NAT)
-- Generate client `.ovpn` configuration files
+- Generate client `.ovpn` configuration files with automatic UDP → TCP fallback
 
 You can safely **run the script again** to:
+
 - Repair a broken configuration
 - Reapply firewall rules
-- Add missing keys or client files
+- Regenerate missing keys or client files
 
 Existing keys and certificates are **not overwritten**.
 
@@ -107,6 +114,19 @@ After a successful run, client files are created here:
 ~/client-configs/files/
 ```
 
+Each file is a **self-contained OpenVPN profile** with all required certificates and keys embedded.
+
+---
+
+### Transport behavior
+
+Each client configuration contains two remote entries:
+
+1. UDP 443 (primary)
+2. TCP 443 (fallback)
+
+The client will automatically fall back to TCP if UDP is blocked.
+
 ---
 
 ## Downloading client files
@@ -114,23 +134,3 @@ After a successful run, client files are created here:
 ### Using scp
 
 ```bash
-scp user@your-server-ip:~/client-configs/files/client1.ovpn .
-```
-
-### Download all client files
-
-```bash
-scp user@your-server-ip:~/client-configs/files/*.ovpn .
-```
-
-### Using rsync
-
-```bash
-rsync -av user@your-server-ip:~/client-configs/files/ .
-```
-
----
-
-## License
-
-This project is licensed under the MIT License.
