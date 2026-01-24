@@ -3,7 +3,6 @@ if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
 set -euo pipefail
 
 VPN_PORT="443"
-VPN_PROTO="udp"
 
 VPN_NET="10.8.0.0"
 VPN_MASK="255.255.255.0"
@@ -28,7 +27,7 @@ warn(){ echo "[WARN] $*" >&2; }
 err(){ echo "[ERROR] $*" >&2; }
 
 if [[ "$(id -u)" -ne 0 ]]; then
-  err "Run as root: sudo ./setupvpn.sh"
+  err "Run as root: sudo ./setup_openvpn.sh"
   exit 1
 fi
 
@@ -40,7 +39,8 @@ EASYRSA_DIR="${VPN_HOME}/easy-rsa"
 CLIENT_DIR="${VPN_HOME}/client-configs"
 
 SERVER_DIR="/etc/openvpn/server"
-SERVER_CONF="${SERVER_DIR}/server.conf"
+SERVER_CONF_UDP="${SERVER_DIR}/server.conf"
+SERVER_CONF_TCP="${SERVER_DIR}/server-tcp.conf"
 TLSV2_SERVER_KEY="${SERVER_DIR}/tls-crypt-v2-server.key"
 
 EXTERNAL_IP="$(curl -fsS "${IP_CHECK_URL}" 2>/dev/null || true)"
@@ -108,9 +108,9 @@ if [[ ! -f "${TLSV2_SERVER_KEY}" ]]; then
 fi
 chmod 600 "${TLSV2_SERVER_KEY}"
 
-cat > "${SERVER_CONF}" <<EOF
+cat > "${SERVER_CONF_UDP}" <<EOF
 port ${VPN_PORT}
-proto ${VPN_PROTO}
+proto udp
 dev tun
 topology subnet
 
@@ -120,7 +120,7 @@ key server.key
 dh none
 
 server ${VPN_NET} ${VPN_MASK}
-ifconfig-pool-persist /var/log/openvpn/ipp.txt
+ifconfig-pool-persist /var/log/openvpn/ipp-udp.txt
 
 client-to-client
 
@@ -144,7 +144,46 @@ persist-key
 persist-tun
 verb 3
 
-status /var/log/openvpn/openvpn-status.log
+status /var/log/openvpn/openvpn-status-udp.log
+EOF
+
+cat > "${SERVER_CONF_TCP}" <<EOF
+port ${VPN_PORT}
+proto tcp-server
+dev tun
+topology subnet
+
+ca ca.crt
+cert server.crt
+key server.key
+dh none
+
+server ${VPN_NET} ${VPN_MASK}
+ifconfig-pool-persist /var/log/openvpn/ipp-tcp.txt
+
+client-to-client
+
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS ${DNS1}"
+push "dhcp-option DNS ${DNS2}"
+
+keepalive 10 120
+explicit-exit-notify 0
+
+tls-crypt-v2 tls-crypt-v2-server.key
+tls-version-min 1.2
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+
+user nobody
+group nogroup
+persist-key
+persist-tun
+verb 3
+
+status /var/log/openvpn/openvpn-status-tcp.log
 EOF
 
 echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-openvpn.conf
@@ -159,14 +198,17 @@ fi
 
 sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 
-ufw allow "${VPN_PORT}/${VPN_PROTO}" >/dev/null 2>&1 || true
+ufw allow "${VPN_PORT}/udp" >/dev/null 2>&1 || true
+ufw allow "${VPN_PORT}/tcp" >/dev/null 2>&1 || true
 ufw allow OpenSSH >/dev/null 2>&1 || true
 ufw route allow in on tun0 out on "${WAN_IFACE}" >/dev/null 2>&1 || true
 ufw route allow in on tun0 out on tun0 >/dev/null 2>&1 || true
 ufw --force enable >/dev/null 2>&1 || true
 
 systemctl enable openvpn-server@server.service >/dev/null 2>&1 || true
+systemctl enable openvpn-server@server-tcp.service >/dev/null 2>&1 || true
 systemctl restart openvpn-server@server.service >/dev/null 2>&1 || true
+systemctl restart openvpn-server@server-tcp.service >/dev/null 2>&1 || true
 
 mkdir -p "${CLIENT_DIR}/keys" "${CLIENT_DIR}/files"
 chmod 700 "${CLIENT_DIR}" "${CLIENT_DIR}/keys"
@@ -186,8 +228,10 @@ done
 cat > "${CLIENT_DIR}/base.conf" <<EOF
 client
 dev tun
-proto ${VPN_PROTO}
-remote ${EXTERNAL_IP:-0.0.0.0} ${VPN_PORT}
+
+remote ${EXTERNAL_IP:-0.0.0.0} ${VPN_PORT} udp
+remote ${EXTERNAL_IP:-0.0.0.0} ${VPN_PORT} tcp-client
+
 resolv-retry infinite
 nobind
 persist-key
@@ -224,11 +268,11 @@ chown -R "${VPN_USER}:${VPN_USER}" "${CLIENT_DIR}" || true
 
 log "DONE"
 echo "WAN interface: ${WAN_IFACE}"
-echo "Server: ${EXTERNAL_IP:-unknown}:${VPN_PORT}/${VPN_PROTO}"
+echo "Server: ${EXTERNAL_IP:-unknown}:${VPN_PORT} (UDP primary, TCP fallback)"
 for c in "${CLIENTS[@]}"; do
   echo "Client: ${CLIENT_DIR}/files/${c}.ovpn"
 done
 
 if [[ -z "${EXTERNAL_IP}" ]]; then
-  warn "External IP could not be detected. Update the 'remote' line in client configs."
+  warn "External IP could not be detected. Update the 'remote' lines in client configs."
 fi
