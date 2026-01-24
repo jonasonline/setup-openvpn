@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+[ -n "${BASH_VERSION:-}" ] || exec /usr/bin/env bash "$0" "$@"
 set -euo pipefail
 
 VPN_PORT="443"
