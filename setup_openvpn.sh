@@ -1,155 +1,234 @@
-#!/bin/bash
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+set -euo pipefail
 
-sudo apt update
-sudo apt install openvpn easy-rsa -y
+VPN_PORT="1194"
+VPN_PROTO="udp"
 
-# Get the current user's home directory and username
-USER_HOME=$(eval echo ~$SUDO_USER)
-USERNAME=$SUDO_USER
+VPN_NET="10.8.0.0"
+VPN_MASK="255.255.255.0"
+VPN_CIDR="10.8.0.0/24"
 
-# Fetch the external IP address of the server
-EXTERNAL_IP=$(curl -s ifconfig.me)
+DNS1="9.9.9.9"
+DNS2="149.112.112.112"
 
-mkdir ~/easy-rsa
-ln -s /usr/share/easy-rsa/* ~/easy-rsa/
+CLIENTS=("client1" "client2" "client3")
 
-#sudo chown "$USER" ~/easy-rsa
-chmod 700 ~/easy-rsa
+REQ_COUNTRY="SE"
+REQ_PROVINCE="VastraGotaland"
+REQ_CITY="Gothenburg"
+REQ_ORG="Example"
+REQ_EMAIL="admin@example.com"
+REQ_OU="VPN"
 
-# Customize the vars file
-cat << EOF > ~/easy-rsa/vars
-set_var EASYRSA_REQ_COUNTRY    "US"
-set_var EASYRSA_REQ_PROVINCE   "NewYork"
-set_var EASYRSA_REQ_CITY       "New York City"
-set_var EASYRSA_REQ_ORG        "DigitalOcean"
-set_var EASYRSA_REQ_EMAIL      "admin@example.com"
-set_var EASYRSA_REQ_OU         "Community"
-set_var EASYRSA_ALGO           "ec"
-set_var EASYRSA_DIGEST         "sha512"
+IP_CHECK_URL="https://api.ipify.org"
+
+log(){ echo "[INFO] $*"; }
+warn(){ echo "[WARN] $*" >&2; }
+err(){ echo "[ERROR] $*" >&2; }
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  err "Run as root: sudo ./setupvpn.sh"
+  exit 1
+fi
+
+VPN_USER="${SUDO_USER:-root}"
+VPN_HOME="$(getent passwd "$VPN_USER" | cut -d: -f6 || true)"
+if [[ -z "${VPN_HOME}" ]]; then VPN_HOME="/root"; fi
+
+EASYRSA_DIR="${VPN_HOME}/easy-rsa"
+CLIENT_DIR="${VPN_HOME}/client-configs"
+
+SERVER_DIR="/etc/openvpn/server"
+SERVER_CONF="${SERVER_DIR}/server.conf"
+TLSV2_SERVER_KEY="${SERVER_DIR}/tls-crypt-v2-server.key"
+
+EXTERNAL_IP="$(curl -fsS "${IP_CHECK_URL}" 2>/dev/null || true)"
+WAN_IFACE="$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5; exit}' || true)"
+if [[ -z "${WAN_IFACE}" ]]; then
+  err "Could not detect WAN interface."
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt update -y
+apt install -y openvpn easy-rsa curl ufw
+
+mkdir -p "${EASYRSA_DIR}"
+if [[ ! -f "${EASYRSA_DIR}/easyrsa" ]]; then
+  cp -a /usr/share/easy-rsa/* "${EASYRSA_DIR}/"
+fi
+chown -R "${VPN_USER}:${VPN_USER}" "${EASYRSA_DIR}"
+chmod 700 "${EASYRSA_DIR}"
+
+cat > "${EASYRSA_DIR}/vars" <<EOF
+set_var EASYRSA_REQ_COUNTRY "${REQ_COUNTRY}"
+set_var EASYRSA_REQ_PROVINCE "${REQ_PROVINCE}"
+set_var EASYRSA_REQ_CITY "${REQ_CITY}"
+set_var EASYRSA_REQ_ORG "${REQ_ORG}"
+set_var EASYRSA_REQ_EMAIL "${REQ_EMAIL}"
+set_var EASYRSA_REQ_OU "${REQ_OU}"
+set_var EASYRSA_ALGO ec
+set_var EASYRSA_DIGEST sha512
 EOF
+chown "${VPN_USER}:${VPN_USER}" "${EASYRSA_DIR}/vars"
 
-cd ~/easy-rsa
-./easyrsa init-pki
-./easyrsa build-ca nopass
+sudo -u "${VPN_USER}" /usr/bin/env bash -c "
+set -euo pipefail
+cd '${EASYRSA_DIR}'
 
-./easyrsa gen-req server nopass
+if [[ ! -d pki ]]; then
+  ./easyrsa init-pki
+fi
 
-sudo cp /home/$USER/easy-rsa/pki/private/server.key /etc/openvpn/server/
+if [[ ! -f pki/ca.crt ]]; then
+  ./easyrsa --batch build-ca nopass
+fi
 
-./easyrsa sign-req server server
+if [[ ! -f pki/issued/server.crt || ! -f pki/private/server.key ]]; then
+  ./easyrsa --batch gen-req server nopass
+  ./easyrsa --batch sign-req server server
+fi
 
-sudo cp /home/$USER/easy-rsa/pki/ca.crt /etc/openvpn/server
-sudo cp /home/$USER/easy-rsa/pki/issued/server.crt /etc/openvpn/server
+for c in ${CLIENTS[*]}; do
+  if [[ ! -f pki/issued/\$c.crt || ! -f pki/private/\$c.key ]]; then
+    ./easyrsa --batch gen-req \"\$c\" nopass
+    ./easyrsa --batch sign-req client \"\$c\"
+  fi
+done
+"
 
-openvpn --genkey --secret ta.key
-sudo cp ta.key /etc/openvpn/server
+install -d -m 750 "${SERVER_DIR}"
+install -m 600 "${EASYRSA_DIR}/pki/private/server.key" "${SERVER_DIR}/server.key"
+install -m 644 "${EASYRSA_DIR}/pki/issued/server.crt" "${SERVER_DIR}/server.crt"
+install -m 644 "${EASYRSA_DIR}/pki/ca.crt" "${SERVER_DIR}/ca.crt"
 
-mkdir -p ~/client-configs/keys
-chmod -R 700 ~/client-configs
+if [[ ! -f "${TLSV2_SERVER_KEY}" ]]; then
+  openvpn --genkey tls-crypt-v2-server "${TLSV2_SERVER_KEY}"
+fi
+chmod 600 "${TLSV2_SERVER_KEY}"
 
-./easyrsa gen-req client1 nopass
-cp pki/private/client1.key ~/client-configs/keys/
-./easyrsa sign-req client client1
-cp /home/$USER/easy-rsa/pki/issued/client1.crt ~/client-configs/keys/
-
-cp ~/easy-rsa/ta.key ~/client-configs/keys/
-sudo cp /etc/openvpn/server/ca.crt ~/client-configs/keys/
-
-sudo chown $USER.$USER ~/client-configs/keys/*
-
-cd ~/
-cat << EOF > ~/server.conf
-port 1194
-proto udp
+cat > "${SERVER_CONF}" <<EOF
+port ${VPN_PORT}
+proto ${VPN_PROTO}
 dev tun
+topology subnet
+
 ca ca.crt
 cert server.crt
 key server.key
 dh none
-server 10.8.0.0 255.255.255.0
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 208.67.222.222"
-push "dhcp-option DNS 208.67.220.220"
+
+server ${VPN_NET} ${VPN_MASK}
 ifconfig-pool-persist /var/log/openvpn/ipp.txt
+
+client-to-client
+
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS ${DNS1}"
+push "dhcp-option DNS ${DNS2}"
+
 keepalive 10 120
-tls-crypt ta.key
-cipher AES-256-GCM
+explicit-exit-notify 1
+
+tls-crypt-v2 tls-crypt-v2-server.key
+tls-version-min 1.2
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
 auth SHA256
+
 user nobody
 group nogroup
 persist-key
 persist-tun
-status /var/log/openvpn/openvpn-status.log
 verb 3
-explicit-exit-notify 1
+
+status /var/log/openvpn/openvpn-status.log
 EOF
-sudo cp server.conf /etc/openvpn/server/
 
-echo "net.ipv4.ip_forward = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-sudo sysctl -p
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-openvpn.conf
+sysctl --system >/dev/null 2>&1 || true
 
-sudo sed -i '/#   ufw-before-forward/a # START OPENVPN RULES\n# NAT table rules\n*nat\n:POSTROUTING ACCEPT [0:0]\n# Allow traffic from OpenVPN client to eth0 (change to the interface you discovered!)\n-A POSTROUTING -s 10.8.0.0/8 -o eth0 -j MASQUERADE\nCOMMIT\n# END OPENVPN RULES' /etc/ufw/before.rules
-sudo sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+UFW_BEFORE="/etc/ufw/before.rules"
+if ! grep -q "^# START OPENVPN RULES" "${UFW_BEFORE}"; then
+  sed -i "/^*filter/i # START OPENVPN RULES\n*nat\n:POSTROUTING ACCEPT [0:0]\n-A POSTROUTING -s ${VPN_CIDR} -o ${WAN_IFACE} -j MASQUERADE\nCOMMIT\n# END OPENVPN RULES\n" "${UFW_BEFORE}"
+else
+  sed -i "/^# START OPENVPN RULES/,/^# END OPENVPN RULES/ s|^-A POSTROUTING -s .* -o .* -j MASQUERADE$|-A POSTROUTING -s ${VPN_CIDR} -o ${WAN_IFACE} -j MASQUERADE|" "${UFW_BEFORE}" || true
+fi
 
-sudo ufw allow 1194/udp
-sudo ufw allow OpenSSH
-sudo ufw disable
-sudo ufw enable
+sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 
-sudo systemctl -f enable openvpn-server@server.service
-sudo systemctl start openvpn-server@server.service
+ufw allow "${VPN_PORT}/${VPN_PROTO}" >/dev/null 2>&1 || true
+ufw allow OpenSSH >/dev/null 2>&1 || true
+ufw route allow in on tun0 out on "${WAN_IFACE}" >/dev/null 2>&1 || true
+ufw route allow in on tun0 out on tun0 >/dev/null 2>&1 || true
+ufw --force enable >/dev/null 2>&1 || true
 
-mkdir -p ~/client-configs/files
-#cp /usr/share/doc/openvpn/examples/sample-config-files/client.conf ~/client-configs/base.conf
+systemctl enable openvpn-server@server.service >/dev/null 2>&1 || true
+systemctl restart openvpn-server@server.service >/dev/null 2>&1 || true
 
-cat << EOF > ~/client-configs/base.conf
+mkdir -p "${CLIENT_DIR}/keys" "${CLIENT_DIR}/files"
+chmod 700 "${CLIENT_DIR}" "${CLIENT_DIR}/keys"
+
+install -m 644 "${EASYRSA_DIR}/pki/ca.crt" "${CLIENT_DIR}/keys/ca.crt"
+
+for c in "${CLIENTS[@]}"; do
+  install -m 600 "${EASYRSA_DIR}/pki/private/${c}.key" "${CLIENT_DIR}/keys/${c}.key"
+  install -m 644 "${EASYRSA_DIR}/pki/issued/${c}.crt" "${CLIENT_DIR}/keys/${c}.crt"
+
+  if [[ ! -f "${CLIENT_DIR}/keys/${c}.tlsv2.key" ]]; then
+    openvpn --tls-crypt-v2 "${TLSV2_SERVER_KEY}" --genkey tls-crypt-v2-client "${CLIENT_DIR}/keys/${c}.tlsv2.key"
+  fi
+  chmod 600 "${CLIENT_DIR}/keys/${c}.tlsv2.key"
+done
+
+cat > "${CLIENT_DIR}/base.conf" <<EOF
 client
 dev tun
-proto udp
-remote $EXTERNAL_IP 1194
+proto ${VPN_PROTO}
+remote ${EXTERNAL_IP:-0.0.0.0} ${VPN_PORT}
 resolv-retry infinite
 nobind
-user nobody
-group nogroup
 persist-key
 persist-tun
 remote-cert-tls server
-cipher AES-256-GCM
+auth-nocache
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
 auth SHA256
+
 verb 3
-key-direction 1
-; script-security 2
-; up /etc/openvpn/update-resolv-conf
-; down /etc/openvpn/update-resolv-conf
-; script-security 2
-; up /etc/openvpn/update-systemd-resolved
-; down /etc/openvpn/update-systemd-resolved
-; down-pre
-; dhcp-option DOMAIN-ROUTE .
 EOF
 
-cat << EOF > ~/client-configs/make_config.sh
-#!/bin/bash
- 
-# First argument: Client identifier
- 
-KEY_DIR=~/client-configs/keys
-OUTPUT_DIR=~/client-configs/files
-BASE_CONFIG=~/client-configs/base.conf
- 
-cat \${BASE_CONFIG} \\
-    <(echo -e '<ca>') \\
-    \${KEY_DIR}/ca.crt \\
-    <(echo -e '</ca>\n<cert>') \\
-    \${KEY_DIR}/\${1}.crt \\
-    <(echo -e '</cert>\n<key>') \\
-    \${KEY_DIR}/\${1}.key \\
-    <(echo -e '</key>\n<tls-crypt>') \\
-    \${KEY_DIR}/ta.key \\
-    <(echo -e '</tls-crypt>') \\
-    > \${OUTPUT_DIR}/\${1}.ovpn
-EOF
+for c in "${CLIENTS[@]}"; do
+  ovpn="${CLIENT_DIR}/files/${c}.ovpn"
+  : > "${ovpn}"
+  cat "${CLIENT_DIR}/base.conf" >> "${ovpn}"
+  printf "%s\n" "<ca>" >> "${ovpn}"
+  cat "${CLIENT_DIR}/keys/ca.crt" >> "${ovpn}"
+  printf "%s\n" "</ca>" >> "${ovpn}"
+  printf "%s\n" "<cert>" >> "${ovpn}"
+  cat "${CLIENT_DIR}/keys/${c}.crt" >> "${ovpn}"
+  printf "%s\n" "</cert>" >> "${ovpn}"
+  printf "%s\n" "<key>" >> "${ovpn}"
+  cat "${CLIENT_DIR}/keys/${c}.key" >> "${ovpn}"
+  printf "%s\n" "</key>" >> "${ovpn}"
+  printf "%s\n" "<tls-crypt-v2>" >> "${ovpn}"
+  cat "${CLIENT_DIR}/keys/${c}.tlsv2.key" >> "${ovpn}"
+  printf "%s\n" "</tls-crypt-v2>" >> "${ovpn}"
+done
 
-chmod 700 ~/client-configs/make_config.sh
-cd ~/client-configs
-./make_config.sh client1
+chown -R "${VPN_USER}:${VPN_USER}" "${CLIENT_DIR}" || true
+
+log "DONE"
+echo "WAN interface: ${WAN_IFACE}"
+echo "Server: ${EXTERNAL_IP:-unknown}:${VPN_PORT}/${VPN_PROTO}"
+for c in "${CLIENTS[@]}"; do
+  echo "Client: ${CLIENT_DIR}/files/${c}.ovpn"
+done
+
+if [[ -z "${EXTERNAL_IP}" ]]; then
+  warn "External IP could not be detected. Update the 'remote' line in client configs."
+fi
